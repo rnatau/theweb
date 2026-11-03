@@ -1,0 +1,59 @@
+# We'll use defaults from the LLVM style, but with 4 columns indentation.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 200
+
+# Adaptations from LLVM
+Language:        Cpp
+AccessModifierOffset: -4      # Indent is 4, so adapt outdent for private, public, etc...
+IndentCaseLabels: true
+
+AlignAfterOpenBracket: AlwaysBreak
+
+AlignArrayOfStructures: Left
+AlignConsecutiveAssignments:
+  Enabled:         false
+  AcrossComments:  true
+  AlignCompound:   true
+
+AlignConsecutiveBitFields:
+  Enabled:         true
+  AcrossComments:  true
+  AlignCompound:   true
+  PadOperators:    true
+
+AlignConsecutiveDeclarations:
+  Enabled:         false
+
+AlignTrailingComments:
+  Kind:            Always
+  OverEmptyLines:  0
+
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Empty
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllArgumentsOnNextLine: false
+AllowShortEnumsOnASingleLine: false
+
+
+BreakBeforeBinaryOperators: None
+BreakConstructorInitializers: AfterColon
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+PackConstructorInitializers: Never
+
+PointerAlignment: Left
+
+PenaltyBreakBeforeFirstCallParameter: 100
+PenaltyBreakOpenParenthesis: 100
+
+BinPackArguments: false
+BinPackParameters: false
+
+
+# Leave comments alone
+ReflowComments: false
+PenaltyBreakComment: 0
+
+# Keep include ordering as it was
+SortIncludes: false
+IncludeBlocks: Preserve

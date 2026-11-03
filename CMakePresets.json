@@ -1,0 +1,69 @@
+{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/cmake-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "synthetic",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/cmake-synthetic",
+      "cacheVariables": {
+        "WEB_BUILD_GAMES": "OFF",
+        "WEB_ASSET_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "sanitize",
+      "inherits": "synthetic",
+      "binaryDir": "${sourceDir}/build/cmake-sanitize",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WEB_SANITIZERS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "synthetic",
+      "configurePreset": "synthetic"
+    },
+    {
+      "name": "sanitize",
+      "configurePreset": "sanitize"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "synthetic",
+      "configurePreset": "synthetic",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "sanitize",
+      "configurePreset": "sanitize",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

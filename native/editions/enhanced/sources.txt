@@ -1,0 +1,5 @@
+editions/enhanced/edition.cpp
+editions/enhanced/start_rules.cpp
+editions/enhanced/menus.cpp
+editions/enhanced/mode_policy.cpp
+editions/enhanced/corrections.cpp

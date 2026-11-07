@@ -7,6 +7,7 @@
 #include "../../edition.hpp"
 #include "camera_window.hpp"
 #include "slideshow_window.hpp"
+#include "keyboard_input.hpp"
 #include <algorithm>
 #include <cstring>
 #include <string_view>
@@ -313,7 +314,7 @@ LRESULT CALLBACK capture_filter(int code, WPARAM w, LPARAM l) {
         const auto dialog = GetAncestor(message.hwnd, GA_ROOT);
         const auto* state = dialog == capture_window ? reinterpret_cast<DialogState*>(GetWindowLongPtrW(dialog, DWLP_USER)) : nullptr;
         if (state && state->capturing >= 0 && (message.message == WM_KEYDOWN || message.message == WM_SYSKEYDOWN)) {
-            SendMessageW(dialog, capture_key, message.wParam, message.lParam);
+            SendMessageW(dialog, capture_key, windows::distinct_key(unsigned(message.wParam), message.lParam), message.lParam);
             message.message = WM_NULL;
         }
     }

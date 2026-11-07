@@ -28,6 +28,7 @@
 #include "sound_output.hpp"
 #include "music_output.hpp"
 #include "gamepad_input.hpp"
+#include "keyboard_input.hpp"
 #include "../../host_settings.hpp"
 #include <algorithm>
 #include <chrono>
@@ -126,6 +127,8 @@ public:
     bool reported_options_error = false;
     std::array<bool, 256> keys{};
     std::array<bool, 256> restart_held_keys{};
+    web::windows::RawKeyboardState raw_keyboard;
+    bool raw_keyboard_registered = false;
     unsigned last_key = 0;
     std::uint64_t nudge_presentations = 0;
     std::unique_ptr<web::NudgePresentation> nudge;
@@ -725,11 +728,17 @@ public:
                 if (message.message == WM_QUIT)
                     return int(message.wParam);
                 TranslateMessage(&message);
-                if (edition.timestamped_input && (message.message == WM_KEYDOWN || message.message == WM_KEYUP))
+                if (edition.timestamped_input && (web::windows::keyboard_message(message.message) || message.message == WM_INPUT))
                     dispatched_input_time = web::input_event_time(nanoseconds(std::chrono::steady_clock::now()), DWORD(GetTickCount64()), message.time);
                 DispatchMessageW(&message);
                 dispatched_input_time.reset();
             }
+            if (!raw_keyboard_registered && game && focused && GetFocus() == window)
+                web::windows::release_missing_modifiers(
+                    keys,
+                    restart_held_keys,
+                    [](unsigned key) { return (GetKeyState(int(key)) & 0x8000) != 0; },
+                    [&](unsigned key) { update_keyboard_key(window, key, false); });
             game_frame(window);
             DWORD result;
             if (running(window)) {
@@ -901,26 +910,20 @@ public:
         }
         return self ? self->handle_message(window, message, w, l) : DefWindowProcW(window, message, w, l);
     }
-    LRESULT handle_key_message(HWND window, UINT message, WPARAM w, LPARAM l) {
-        const bool down = message == WM_KEYDOWN;
-        if (edition.consolidated_menu) {
-            if (w == VK_SHIFT)
-                w = MapVirtualKeyW((unsigned(l) >> 16) & 255, MAPVK_VSC_TO_VK_EX);
-            else if (w == VK_CONTROL)
-                w = (l & (1LL << 24)) ? VK_RCONTROL : VK_LCONTROL;
-        }
+    void update_keyboard_key(HWND window, unsigned key, bool down) {
         // A key held across game replacement must be released before it can
         // affect the new game, including Windows auto-repeat key-down messages.
-        if (w < restart_held_keys.size() && restart_held_keys[w]) {
+        if (key < restart_held_keys.size() && restart_held_keys[key]) {
             if (!down)
-                restart_held_keys[w] = false;
-            return 0;
+                restart_held_keys[key] = false;
+            return;
         }
         if (game) {
-            if (down && w < keys.size())
-                last_key = unsigned(w);
-            if (w < keys.size())
-                keys[w] = down;
+            if (down && key < keys.size())
+                last_key = key;
+            if (key < keys.size())
+                keys[key] = down;
+            web::windows::combine_modifiers(keys);
             const auto previous = actions;
             actions = edition.consolidated_menu ? host_settings.keyboard_actions(keys) & ~web::host_action::commands : options.actions(keys);
             pending_actions |= actions & ~previous;
@@ -930,6 +933,59 @@ public:
                 input_timeline.record({timestamp, web::InputSource::keyboard, actions});
             }
         }
+    }
+    void apply_raw_keyboard(HWND window) {
+        const auto& next = raw_keyboard.held();
+        // Apply releases before presses when taking over from legacy input or
+        // removing a device. All transitions retain the packet's timestamp.
+        for (unsigned key = 0; key < keys.size(); ++key)
+            if (!web::windows::generic_modifier(key) && !next[key] && (keys[key] || restart_held_keys[key]))
+                update_keyboard_key(window, key, false);
+        for (unsigned key = 0; key < keys.size(); ++key)
+            if (!web::windows::generic_modifier(key) && next[key] && !keys[key])
+                update_keyboard_key(window, key, true);
+        for (const unsigned key : {VK_SHIFT, VK_CONTROL, VK_MENU})
+            if (!next[key])
+                restart_held_keys[key] = false;
+    }
+    void raw_keyboard_failure(HWND window, DWORD error) {
+        RAWINPUTDEVICE device{0x01, 0x06, RIDEV_REMOVE, nullptr};
+        RegisterRawInputDevices(&device, 1, sizeof(device));
+        raw_keyboard_registered = false;
+        raw_keyboard = {};
+        for (unsigned key = 0; key < keys.size(); ++key)
+            if (keys[key] || restart_held_keys[key])
+                update_keyboard_key(window, key, false);
+        reports.report("Raw keyboard unavailable; using Windows input", std::system_category().message(int(error)));
+    }
+    void read_raw_keyboard(HWND window, HRAWINPUT handle) {
+        if (!raw_keyboard_registered)
+            return;
+        RAWINPUT packet{};
+        UINT size = sizeof(packet);
+        const auto bytes = GetRawInputData(handle, RID_INPUT, &packet, &size, sizeof(RAWINPUTHEADER));
+        if (bytes == UINT(-1)) {
+            raw_keyboard_failure(window, GetLastError());
+            return;
+        }
+        if (bytes < sizeof(RAWINPUTHEADER) + sizeof(RAWKEYBOARD) || packet.header.dwType != RIM_TYPEKEYBOARD || !focused || GetFocus() != window)
+            return;
+        if (raw_keyboard.update(packet.header.hDevice, packet.data.keyboard)) {
+            if (const auto transition = web::windows::raw_key(packet.data.keyboard); transition && transition->down && !restart_held_keys[transition->key])
+                last_key = transition->key; // Retain Classic's repeat-key volume feedback.
+            apply_raw_keyboard(window);
+            if (packet.data.keyboard.MakeCode == KEYBOARD_OVERRUN_MAKE_CODE)
+                reports.report("Keyboard key limit reached", "Windows reported KEYBOARD_OVERRUN_MAKE_CODE; released this keyboard's held controls");
+        }
+    }
+    LRESULT handle_key_message(HWND window, UINT message, WPARAM w, LPARAM l) {
+        const bool down = web::windows::keyboard_pressed(message);
+        w = web::windows::distinct_key(unsigned(w), l);
+        const bool suppressed = w < restart_held_keys.size() && restart_held_keys[w];
+        if (!raw_keyboard.active())
+            update_keyboard_key(window, unsigned(w), down);
+        if (suppressed)
+            return 0;
         if (w == 'F')
             held[0] = down;
         if (w == 'J')
@@ -985,19 +1041,52 @@ public:
         }
         return 0;
     }
+    bool system_game_key(WPARAM value, LPARAM flags) const {
+        if (!game)
+            return false;
+        const auto key = web::windows::distinct_key(unsigned(value), flags);
+        if (key >= keys.size())
+            return false;
+        if (keys[key] || restart_held_keys[key])
+            return true;
+        if (edition.consolidated_menu)
+            return std::find(host_settings.keys.begin(), host_settings.keys.end(), key) != host_settings.keys.end();
+        std::array<bool, 256> candidate{};
+        candidate[key] = true;
+        web::windows::combine_modifiers(candidate);
+        return options.actions(candidate) != 0;
+    }
     LRESULT handle_message(HWND window, UINT message, WPARAM w, LPARAM l) {
         try {
             if (const auto result = web::development::inspect(*this, message, w))
                 return *result;
             switch (message) {
+                case WM_SYSCOMMAND:
+                    if (game && (w & 0xfff0) == SC_KEYMENU)
+                        return 0; // The table owns its menus; bare Alt/F10 cannot capture gameplay input.
+                    break;
+                case WM_INPUT:
+                    read_raw_keyboard(window, reinterpret_cast<HRAWINPUT>(l));
+                    return DefWindowProcW(window, message, w, l);
+                case WM_INPUT_DEVICE_CHANGE:
+                    if (w == GIDC_REMOVAL && raw_keyboard.active()) {
+                        raw_keyboard.remove(reinterpret_cast<HANDLE>(l));
+                        if (focused && GetFocus() == window)
+                            apply_raw_keyboard(window);
+                    }
+                    return 0;
                 case WM_SYSKEYDOWN:
                     if (w == VK_RETURN && (l & alt_pressed_bit)) {
                         if (!(l & previous_key_down_bit))
                             set_fullscreen(window, !display.fullscreen);
                         return 0;
                     }
+                    if (w != VK_F4 && system_game_key(w, l))
+                        return handle_key_message(window, message, w, l);
                     break;
                 case WM_SYSKEYUP:
+                    if (system_game_key(w, l))
+                        return handle_key_message(window, message, w, l);
                     if (w == VK_RETURN)
                         return 0;
                     break;
@@ -1030,6 +1119,7 @@ public:
                 case WM_KEYUP:
                     return handle_key_message(window, message, w, l);
                 case WM_KILLFOCUS:
+                    raw_keyboard.clear();
                     keys.fill(false);
                     last_key = 0;
                     held.fill(false);
@@ -1115,6 +1205,11 @@ public:
                     DestroyWindow(window);
                     return 0;
                 case WM_DESTROY:
+                    if (raw_keyboard_registered) {
+                        RAWINPUTDEVICE device{0x01, 0x06, RIDEV_REMOVE, nullptr};
+                        RegisterRawInputDevices(&device, 1, sizeof(device));
+                        raw_keyboard_registered = false;
+                    }
                     checkpoint_scores();
                     checkpoint_options();
                     if (game)
@@ -1179,6 +1274,12 @@ public:
         auto window = CreateWindowExW(0, klass.lpszClassName, L"The Web", window_style, monitor.rcWork.left, monitor.rcWork.top, screen.width, screen.height, nullptr, nullptr, instance, this);
         if (!window)
             throw std::runtime_error("Cannot create native window");
+        if (game) {
+            RAWINPUTDEVICE device{0x01, 0x06, RIDEV_DEVNOTIFY, window};
+            raw_keyboard_registered = RegisterRawInputDevices(&device, 1, sizeof(device)) != FALSE;
+            if (!raw_keyboard_registered)
+                raw_keyboard_failure(window, GetLastError());
+        }
         const bool start_fullscreen = display.fullscreen;
         display.fullscreen = false;
         fit_pixel_window(window, target_monitor);

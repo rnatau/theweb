@@ -52,9 +52,12 @@ enum ProbeMessage : UINT {
     query_presentation_rate = WM_APP + 41,
     query_remaining_microsteps = WM_APP + 42,
     query_completed_ticks = WM_APP + 43,
+    query_raw_keyboard = WM_APP + 44,
 };
 template <class Host> std::optional<LRESULT> inspect(const Host& host, UINT message, WPARAM w) {
     switch (message) {
+        case query_raw_keyboard:
+            return unsigned(host.raw_keyboard_registered) | (unsigned(host.raw_keyboard.active()) << 1);
         case query_microsteps:
             return LRESULT(host.incremental.microsteps());
         case query_presentation_rate:

@@ -221,10 +221,12 @@ private:
     RestartGesture restart_gesture_;
     rules::CollectionPolicy collection_policy_ = nullptr;
     bool restart_pending_ = false;
+    bool restart_start_armed_ = false, restart_requested_ = false;
     unsigned restart_frames_ = 0;
     std::uint64_t frames_ = 0, interactions_ = 0, drains_ = 0, launches_ = 0;
     void begin_ball();
     void drain_for_restart();
+    bool restart_drained() const;
     void step_frame(std::uint32_t actions, const TimedInputFrame* input);
     void begin_frame(std::uint32_t actions, const TimedInputFrame* input);
     void finish_frame(std::uint32_t actions, std::uint32_t display_edges);

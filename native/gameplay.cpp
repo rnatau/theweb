@@ -108,7 +108,10 @@ void PinballGame::drain_for_restart() {
     game_state_.turn.returns_paused = 0;
     game_state_.turn.tilt_lock = 1;
     game_state_.turn.auto_kick_enabled = 0;
-    game_state_.turn.launch_enabled = 1;
+    // The shooter fires on its normal physical contact, including balls still
+    // travelling down the lane. Do not open the player-launch save window.
+    game_state_.turn.launch_enabled = 0;
+    game_state_.turn.auto_launch_block = 0;
     simulation_.actions = 0;
     simulation_.force_timer = 0;
     simulation_.nudge = {};
@@ -117,14 +120,9 @@ void PinballGame::drain_for_restart() {
         auto& ball = simulation_.balls[slot];
         if (!ball.active() || ball.motion_type() == ball_type::pending_drain || ball.motion_mode() == motion_mode::draining)
             continue;
-        if (ball.motion_type() == ball_type::launcher) {
-            // A ball already in the shooter lane drops into its trough rather
-            // than being fired into play by the restart gesture.
-            ball.motion_type(ball_type::free);
-            ball.motion_mode(motion_mode::draining);
-            ball.transition_kind(0);
-            ball.vertical_velocity(0);
-        } else if (ball.motion_type() != ball_type::free || ball.motion_mode() == motion_mode::held || ball.motion_mode() == motion_mode::station_hold) {
+        if (ball.motion_type() == ball_type::launcher)
+            continue;
+        if (ball.motion_type() != ball_type::free || ball.motion_mode() == motion_mode::held || ball.motion_mode() == motion_mode::station_hold) {
             const auto exit = ball.motion_type() == ball_type::lift_return                                     ? rules::BallLifecycle::Exit::lift
                               : ball.motion_type() == ball_type::upper_return || ball.position().x >= 0xa00000 ? rules::BallLifecycle::Exit::right
                                                                                                                : rules::BallLifecycle::Exit::left;
@@ -134,8 +132,18 @@ void PinballGame::drain_for_restart() {
     // Original SFX_ID_E_BYEB: E1400001.pcm, through normal mixer arbitration.
     constexpr int farewell_sound = 81;
     scoring_.sound({farewell_sound, 0, 0, 1});
+    // Presentation enters pre-game immediately; physical clear-down and Start
+    // eligibility remain owned by the retained session.
+    display_.reset();
+    update_display_contexts(0, 0);
+    DotMatrixRenderer::ScorePage idle;
+    idle.started = false;
+    display_.advance(0, idle);
 }
 bool PinballGame::restart_ready() const {
+    return restart_requested_ && restart_drained();
+}
+bool PinballGame::restart_drained() const {
     // Give the farewell (0.87 s) and the final physical drain a short settle.
     return restart_pending_ && restart_frames_ >= unsigned(simulation_.refresh_rate) &&
            std::none_of(simulation_.balls.begin(), simulation_.balls.end(), [](const auto& ball) { return ball.active() != 0; });
@@ -195,13 +203,21 @@ void PinballGame::begin_frame(std::uint32_t actions, const TimedInputFrame* inpu
     if (!restart_pending_ && restart_gesture_ && restart_gesture_(gesture_actions, game_state_.turn, simulation_.refresh_rate))
         drain_for_restart();
     if (restart_pending_) {
+        const auto start_edge = (input ? input->pressed : actions & ~previous_actions_) & input_action::start;
+        if (!(gesture_actions & input_action::start) || (input && (input->released & input_action::start)))
+            restart_start_armed_ = true;
+        // Discard presses during clear-down. Standby accepts only a new Start
+        // edge after the old balls have finished, never the original hold.
+        if (restart_start_armed_ && start_edge && restart_drained())
+            restart_requested_ = true;
+        previous_actions_ = gesture_actions;
         ++restart_frames_;
         ++frames_;
         game_state_.turn.elapsed = rules::rule_time::second / simulation_.refresh_rate;
         lifecycle_.update_returns(simulation_, game_state_.turn, *this);
         actions = 0;
     }
-    frame_edges_ = input ? input->pressed : actions & ~previous_actions_;
+    frame_edges_ = restart_pending_ ? 0 : input ? input->pressed : actions & ~previous_actions_;
     frame_actions_ = actions;
     if (!restart_pending_)
         step_rules(actions, input);
@@ -279,7 +295,7 @@ void PinballGame::finish_frame(std::uint32_t actions, std::uint32_t display_edge
     }
     page.credits = scoring_.replay().credits;
     page.repeated_simulation = simulation_.double_steps != 0;
-    page.started = phase_ != Phase::ready && phase_ != Phase::game_over;
+    page.started = !restart_pending_ && phase_ != Phase::ready && phase_ != Phase::game_over;
     std::optional<DotMatrixRenderer::BonusPage> bonus_page;
     {
         // Selector 57 can outlive phase four. Its values still follow the
@@ -539,9 +555,9 @@ void PinballGame::on_event(const PhysicsEvent& event, BallSlots& balls) {
             ++drains_;
         } else if (event.kind() == PhysicsEvent::Kind::surface_rule) {
             const auto transition = event.get<SurfaceContact>().transition;
-            // The dock and shooter trough swallow incoming balls as well;
-            // neither may capture or fire a replacement during the clear-down.
-            lifecycle_.surface_transition(simulation_, game_state_.turn, event.slot, transition == 11 || transition == 16 ? 0 : transition, *this);
+            // The dock cannot capture another ball. The shooter retains its
+            // normal automatic launch so balls drain through the playfield.
+            lifecycle_.surface_transition(simulation_, game_state_.turn, event.slot, transition == 11 ? 0 : transition, *this);
         } else if (event.kind() == PhysicsEvent::Kind::sound)
             scoring_.sound(event.get<SoundRequest>());
         return;
@@ -605,6 +621,8 @@ void PinballGame::on_effect(const rules::SessionEffect& effect, SimulationState&
         display_.warning(game_state_.turn.tilted ? -1 : game_state_.turn.warnings_left, unsigned(effect.get<RuleDisplayRequest>().ticks));
 }
 std::string PinballGame::status() const {
+    if (restart_pending_)
+        return restart_drained() ? "Press S to start" : "Draining";
     const auto turn = player_count() > 1 ? "Player " + std::to_string(current_player() + 1) + " | " : "";
     if (phase_ == Phase::ready)
         return "Press S to start";

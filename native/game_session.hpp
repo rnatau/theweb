@@ -47,6 +47,8 @@ public:
     virtual bool step_microstep(TimedInputSample) = 0;
     virtual unsigned remaining_microsteps() const = 0;
     virtual void start() = 0;
+    // Enhanced retains the abandoned session while clearing and in standby.
+    // Replacement is ready only after draining and a fresh standby Start.
     virtual bool restart_pending() const = 0;
     virtual bool restart_ready() const = 0;
     virtual TableFrameView table_view() const = 0;

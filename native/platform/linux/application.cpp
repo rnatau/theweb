@@ -29,7 +29,13 @@ namespace web {
 namespace {
 using Clock = std::chrono::steady_clock;
 std::filesystem::path executable_directory() {
-    return std::filesystem::canonical("/proc/self/exe").parent_path();
+    // SDL resolves the executable on both Linux and macOS, regardless of CWD.
+    auto* base = SDL_GetBasePath();
+    if (!base)
+        throw std::runtime_error(std::string("Cannot locate executable: ") + SDL_GetError());
+    const std::filesystem::path directory(base);
+    SDL_free(base);
+    return directory;
 }
 std::filesystem::path assets_directory() {
     const auto directory = executable_directory();
@@ -39,11 +45,17 @@ std::filesystem::path assets_directory() {
     throw std::runtime_error("Cannot find The Web assets. Place data/PC_DAT beside the executable.");
 }
 std::filesystem::path default_save_root() {
+#ifdef __APPLE__
+    if (const auto value = std::getenv("HOME"); value && *value)
+        return std::filesystem::path(value) / "Library/Application Support/theweb";
+    throw std::runtime_error("Cannot choose save directory: set HOME or --save-dir");
+#else
     if (const auto value = std::getenv("XDG_DATA_HOME"); value && std::filesystem::path(value).is_absolute())
         return std::filesystem::path(value) / "theweb";
     if (const auto value = std::getenv("HOME"); value && *value)
         return std::filesystem::path(value) / ".local/share/theweb";
     throw std::runtime_error("Cannot choose save directory: set HOME, XDG_DATA_HOME or --save-dir");
+#endif
 }
 unsigned key_code(SDL_Keycode key) {
     if (key >= SDLK_a && key <= SDLK_z)
@@ -291,7 +303,7 @@ public:
                     std::cout << "SMOKE " << edition_.id << " stage " << smoke_.stage() << std::endl;
                 smoke_deadline = now + std::chrono::milliseconds(17);
                 if (smoke_tick > 1100)
-                    throw std::runtime_error("Linux smoke test timed out at stage " + std::to_string(smoke_.stage()));
+                    throw std::runtime_error("SDL smoke test timed out at stage " + std::to_string(smoke_.stage()));
             }
             now = Clock::now();
             const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(now - previous_).count();
@@ -322,7 +334,7 @@ public:
                 update_audio();
                 present();
                 if (launch_.smoke_test && smoke_tick > 1100)
-                    throw std::runtime_error("Linux smoke test timed out at stage " + std::to_string(smoke_.stage()));
+                    throw std::runtime_error("SDL smoke test timed out at stage " + std::to_string(smoke_.stage()));
             }
             const auto work = nanoseconds(Clock::now()) - nanoseconds(previous_);
             const auto remaining = edition_.incremental_presentation && timed_play() ? presentation_clock_.until_next_frame_ns() : clock_.until_next_frame_ns();
@@ -1037,7 +1049,7 @@ int linux_main(int argc, char** argv, bool development, const Edition& edition) 
             };
             if (arg == "--version") {
                 std::cout << edition.title << " " << edition.version << " | " << edition.id << " | rules " << edition.rules_version << " | physics " << edition.physics_version << " | input "
-                          << edition.input_version << " | Linux SDL\n";
+                          << edition.input_version << " | SDL desktop\n";
                 return 0;
             } else if (arg == "--help") {
                 std::cout << edition.title << " " << edition.version

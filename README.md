@@ -1,7 +1,7 @@
-# Pro Pinball: The Web — native reconstruction
+# Pro Pinball: The Web — re-implementation
 
 A C++20 reconstruction for modern Windows, Linux and macOS, with **Classic 1.52p**
-(`theweb`) and **Enhanced 1.60B** (`theweb-enhanced`).
+(`theweb`) and **Enhanced 1.60b** (`theweb-enhanced`).
 
 **This effort relied HEAVILY on OpenAI Codex** for reconstruction, implementation,
 testing and documentation, guided by a human developer. This is an unofficial
@@ -14,46 +14,43 @@ the tests requires no original game files.
 
 ## Classic
 
-Reconstructed Windows 1.50P rules and integer physics, with the supplied 1.52P
-caption. Includes one to four players, all missions/modes, original menus,
+Reconstructed Windows 1.52p rules and integer physics. Includes one to four players, all missions/modes, original menus,
 six cameras, DMD, sound effects and optional MP3 music.
 
 - Runs on modern Windows/Linux/macOS without a CD or original executable.
 - Aspect-preserving fullscreen/windowed scaling and crisp DMD dots.
-- Separate edition saves, atomic writes and damaged-file protection.
-- Windows Raw Input keyboard handling.
+- Separate edition saves
 - Safety guards and Space Station exit-artwork cleanup.
 
 Classic otherwise preserves original behavior and quality settings.
 
 ## Enhanced
 
-#### 1.60B
+#### 1.60b
 
 * Added MacOS support (partly untested)
-* Add Antialiasing
+* Added Antialiasing
 * Fix sticky keys/paddles
-* Make restart more realistic (balls don't disappear, ever)
+* Make game restart more realistic (balls don't disappear, ever)
 
-#### 1.60A
+#### 1.60a
 
 - DirectX 11 GPU rendering on Windows, with GDI fallback.
 - Frame-synchronized high-refresh play; validated at 175 Hz on Windows.
-- Timestamped keyboard/controller input applied within physics ticks.
+- Timestamped keyboard/controller input
 - Remappable keyboard, Xbox and generic Windows gamepad controls.
-- Event-driven WASAPI audio, independent of rendering.
+- Event-driven WASAPI audio
 - Pause-menu resume and integrated settings menus.
 - Maximum graphics/effects quality: 1024×768, 44.1 kHz stereo, 16-bit.
-- Antialiased ball/flipper edges and partial ball occlusion; the DMD stays crisp.
+- Antialiased ball/flipper edges and partial ball occlusion
 - Directional nudging with persistent ball displacement.
 - A 10% narrower lower-flipper gap.
-- Hold Start for one second to launch any waiting ball and drain into standby,
-  with the pre-game DMD shown immediately. Press Start again after draining.
+- Hold Start for one second to cancel game
 - Missions don't get interrupted by other events
-- Pre-buy-in high scores are still stored
+- Pre-buy-in high scores are still stored as high scores
 - Original physics, rule, display and stereo bug corrections.
 
-#### 1.52P
+#### 1.52p
 
 * Original state
 
@@ -66,7 +63,7 @@ Run commands from this repository's root. No game data is needed to compile.
 GitHub Releases provide a Windows x64 ZIP, a Linux x64 tar.gz, and macOS ZIPs
 for Apple Silicon (`macos-arm64`) and Intel (`macos-x64`), each containing Classic
 and Enhanced. Extract the archive, then supply your own game data as described
-below. Game data and music are never included.
+below. Game data and music are not included.
 Windows release downloads link the Visual C++ runtime statically. Linux downloads
 are built on Ubuntu 22.04 and require SDL2 and mpg123 runtime libraries
 (`sudo apt-get install libsdl2-2.0-0 libmpg123-0` on Debian/Ubuntu).

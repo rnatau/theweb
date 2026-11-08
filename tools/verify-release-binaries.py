@@ -1,4 +1,4 @@
-"""Reject embedded debug information and static symbol tables in PE/ELF releases."""
+"""Reject embedded debug information and private symbols in PE/ELF/Mach-O releases."""
 import argparse
 import hashlib
 import json
@@ -71,6 +71,43 @@ def pe_debug_metadata(data, pe, optional, path):
     return metadata
 
 
+def inspect_macho(data, path):
+    assert len(data) >= 32, f'{path}: truncated Mach-O header'
+    cpu, subtype, filetype, count, size = struct.unpack_from('<IIIII', data, 4)
+    assert cpu in (0x01000007, 0x0100000c), f'{path}: expected x64 or arm64 Mach-O'
+    assert filetype in (2, 6), f'{path}: expected Mach-O executable or dylib'
+    end = 32 + size
+    assert end <= len(data), f'{path}: truncated Mach-O load commands'
+    cursor = 32
+    for _ in range(count):
+        assert cursor + 8 <= end, f'{path}: truncated Mach-O load command'
+        command, length = struct.unpack_from('<II', data, cursor)
+        assert length >= 8 and cursor + length <= end, f'{path}: malformed Mach-O load command'
+        if command == 0x19:  # LC_SEGMENT_64
+            assert length >= 72, f'{path}: truncated Mach-O segment'
+            segment = data[cursor + 8:cursor + 24].rstrip(b'\0')
+            assert segment != b'__DWARF', f'{path}: debug sections remain'
+            sections = struct.unpack_from('<I', data, cursor + 64)[0]
+            assert 72 + sections * 80 <= length, f'{path}: truncated Mach-O sections'
+            for index in range(sections):
+                section = cursor + 72 + index * 80
+                name = data[section:section + 16].rstrip(b'\0')
+                flags = struct.unpack_from('<I', data, section + 64)[0]
+                assert not flags & 0x02000000 and not name.startswith((b'__debug', b'__zdebug')), \
+                    f'{path}: debug sections remain'
+        elif command == 2:  # LC_SYMTAB: exported/dynamic symbols must remain usable.
+            assert length >= 24, f'{path}: truncated Mach-O symbol command'
+            offset, symbols = struct.unpack_from('<II', data, cursor + 8)
+            assert offset + symbols * 16 <= len(data), f'{path}: truncated Mach-O symbol table'
+            for index in range(symbols):
+                kind = data[offset + index * 16 + 4]
+                assert not kind & 0xe0, f'{path}: Mach-O debug symbols remain'
+                assert kind & 1 or (kind & 0x0e) == 0, f'{path}: Mach-O private symbols remain'
+        cursor += length
+    assert cursor == end, f'{path}: malformed Mach-O command count'
+    return 'arm64' if cpu == 0x0100000c else 'x64'
+
+
 def inspect(path):
     data = path.read_bytes()
     metadata = []
@@ -97,6 +134,11 @@ def inspect(path):
         assert not any(h[1] == 2 for h in headers), f'{path}: static symbol table remains'
         assert all(not name.startswith((b'.debug', b'.zdebug', b'.stab')) for name in sections), f'{path}: debug sections remain'
         kind = 'ELF'
+    elif data[:4] == b'\xcf\xfa\xed\xfe':
+        architecture = inspect_macho(data, path)
+        return {'path': str(path), 'format': 'Mach-O', 'architecture': architecture, 'bytes': len(data),
+                'sha256': hashlib.sha256(data).hexdigest(), 'debug_information': False,
+                'static_symbols': False, 'pe_debug_metadata': []}
     else:
         raise AssertionError(f'{path}: unrecognized executable format')
     return {'path': str(path), 'format': kind, 'bytes': len(data),

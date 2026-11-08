@@ -2,7 +2,9 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import plistlib
 import struct
 import subprocess
 import tarfile
@@ -55,6 +57,17 @@ def pe_image(entries=(), pe32=False):
     return image
 
 
+def macho_image(architecture="arm64", symbol_type=0x0f, dwarf=False):
+    image = bytearray(256)
+    cpu = 0x0100000c if architecture == "arm64" else 0x01000007
+    struct.pack_into('<IIIIIIII', image, 0, 0xfeedfacf, cpu, 0, 2, 2, 96, 0, 0)
+    struct.pack_into('<II16sQQQQIIII', image, 32, 0x19, 72,
+                     b'__DWARF' if dwarf else b'__TEXT', 0, 0, 0, 0, 0, 0, 0, 0)
+    struct.pack_into('<IIIIII', image, 104, 2, 24, 128, 1, 144, 16)
+    struct.pack_into('<IBBHQ', image, 128, 1, symbol_type, 1, 0, 0)
+    return image
+
+
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -64,6 +77,12 @@ class ReleaseTests(unittest.TestCase):
         (self.root / "tools/verify-release-binaries.py").write_bytes(VERIFIER.read_bytes())
         (self.root / "README.md").write_text("Supply your own data/PC_DAT.", encoding="utf-8")
         (self.root / "LICENSE").write_text("MIT", encoding="utf-8")
+        (self.root / "cmake").mkdir()
+        (self.root / "cmake/FixMacOSBundle.cmake").write_text("# mocked by tests", encoding="utf-8")
+        self.dependencies = self.root / "dependencies"
+        for folder in ("licenses", "sources"):
+            (self.dependencies / folder).mkdir(parents=True)
+            (self.dependencies / folder / "notice.txt").write_text("dependency notice", encoding="utf-8")
         self.build = self.root / "build"
         self.build.mkdir()
         # Deliberately include private/unshipped content beside the binaries.
@@ -82,11 +101,32 @@ class ReleaseTests(unittest.TestCase):
         self.destination = self.root / "dist"
 
     def package(self, platform):
-        with patch.object(packager.subprocess, "run", return_value=subprocess.CompletedProcess(
-                [], 0, stdout="edition test version\n")) as launch:
-            result = packager.package(self.root, self.build, self.destination, platform, TAG, COMMIT)
-        self.assertEqual(launch.call_count, 4)
+        if platform.startswith("macos-"):
+            for name in packager.MACOS_APPS:
+                (self.build / name).write_bytes(macho_image(platform.removeprefix("macos-")))
+
+        def command(args, **kwargs):
+            if args[0] == "cmake":
+                app = Path(args[1].removeprefix("-DWEB_APP="))
+                executable = next((app / "Contents/MacOS").iterdir())
+                (executable.parent / "libtest.dylib").write_bytes(executable.read_bytes())
+                if getattr(self, "bundle_symlink", False):
+                    (executable.parent / "libalias.dylib").symlink_to("libtest.dylib")
+            if args[0] == "codesign" and "--sign" in args and args[-1].endswith(".app"):
+                signature = Path(args[-1]) / "Contents/_CodeSignature"
+                signature.mkdir()
+                (signature / "CodeResources").write_bytes(b"mock signature")
+            return subprocess.CompletedProcess(args, 0, stdout="edition test version\n")
+
+        with patch.object(packager.subprocess, "run", side_effect=command) as launch:
+            result = packager.package(self.root, self.build, self.destination, platform, TAG, COMMIT,
+                                      self.dependencies)
+        self.assertEqual(sum(call.args[0][-1] in ("--version", "--help") for call in launch.call_args_list), 4)
         return result
+
+    def all_packages(self):
+        for platform in packager.PLATFORMS:
+            self.package(platform)
 
     def test_archive_allowlist_checksums_and_linux_modes(self):
         for platform in ("windows-x64", "linux-x64"):
@@ -112,20 +152,113 @@ class ReleaseTests(unittest.TestCase):
                     digest, name = line.split("  ")
                     self.assertEqual(digest, hashlib.sha256(files[name]).hexdigest())
 
-    def test_both_artifacts_are_required_and_verified(self):
-        self.package("windows-x64")
-        with self.assertRaises(FileNotFoundError):
-            publisher.verify_artifacts(self.destination, TAG, COMMIT)
-        self.package("linux-x64")
+    def test_all_artifacts_are_required_and_verified(self):
+        for platform in ("windows-x64", "linux-x64", "macos-arm64"):
+            self.package(platform)
+            with self.assertRaises(FileNotFoundError):
+                publisher.verify_artifacts(self.destination, TAG, COMMIT)
+        self.package("macos-x64")
         assets = publisher.verify_artifacts(self.destination, TAG, COMMIT)
-        self.assertEqual(len(assets), 3)
-        self.assertEqual(len(assets[-1].read_text().splitlines()), 2)
+        self.assertEqual(len(assets), 5)
+        self.assertEqual(len(assets[-1].read_text().splitlines()), 4)
         with self.assertRaisesRegex(ValueError, "Source identity"):
             publisher.verify_artifacts(self.destination, TAG, "b" * 40)
         with assets[0].open("ab") as output:
             output.write(b"damaged")
         with self.assertRaisesRegex(ValueError, "checksum"):
             publisher.verify_artifacts(self.destination, TAG, COMMIT)
+
+    def test_macos_apps_modes_sources_and_no_private_media(self):
+        for platform in ("macos-arm64", "macos-x64"):
+            with self.subTest(platform=platform):
+                archive = self.package(platform)
+                prefix = f"TheWeb-{TAG}-{platform}/"
+                with zipfile.ZipFile(archive) as source:
+                    files = {name.removeprefix(prefix): source.read(name) for name in source.namelist()}
+                    expected = {"README.md", "LICENSE", "build-info.json", "SHA256SUMS",
+                                "third-party-sources/notice.txt"}
+                    for name, app in packager.MACOS_APPS.items():
+                        expected.update(f"{app}/Contents/{suffix}" for suffix in (
+                            "Info.plist", f"MacOS/{name}", "MacOS/libtest.dylib",
+                            "Resources/licenses/notice.txt", "_CodeSignature/CodeResources"))
+                        info = plistlib.loads(files[f"{app}/Contents/Info.plist"])
+                        self.assertEqual(info["CFBundleExecutable"], name)
+                        self.assertEqual(info["CFBundleVersion"], "2026.11.3")
+                        self.assertEqual(info["SDL_FILESYSTEM_BASE_DIR_TYPE"], "parent")
+                        self.assertEqual(info["TheWebSourceCommit"], COMMIT)
+                        mode = source.getinfo(prefix + f"{app}/Contents/MacOS/{name}").external_attr >> 16
+                        self.assertEqual(mode & 0o777, 0o755)
+                    self.assertEqual(set(files), expected)
+                    for line in files["SHA256SUMS"].decode().splitlines():
+                        digest, name = line.split("  ")
+                        self.assertEqual(digest, hashlib.sha256(files[name]).hexdigest())
+
+    def test_macho_architectures_and_dynamic_symbols_are_accepted(self):
+        path = self.build / "theweb"
+        for architecture in ("arm64", "x64"):
+            path.write_bytes(macho_image(architecture))
+            self.assertEqual(verifier.inspect(path)["architecture"], architecture)
+
+    @unittest.skipIf(os.name == "nt", "Windows symlinks require additional privileges")
+    def test_macos_library_symlinks_survive_archiving(self):
+        self.bundle_symlink = True
+        archive = self.package("macos-arm64")
+        prefix = f"TheWeb-{TAG}-macos-arm64/"
+        with zipfile.ZipFile(archive) as source:
+            for app in packager.MACOS_APPS.values():
+                info = source.getinfo(prefix + f"{app}/Contents/MacOS/libalias.dylib")
+                self.assertEqual(info.external_attr >> 16, 0o120777)
+                self.assertEqual(source.read(info), b"libtest.dylib")
+
+    def test_macho_private_debug_symbols_and_dwarf_are_rejected(self):
+        path = self.build / "theweb"
+        for content, message in ((macho_image(symbol_type=0x0e), "private symbols"),
+                                 (macho_image(symbol_type=0x64), "debug symbols"),
+                                 (macho_image(dwarf=True), "debug sections")):
+            path.write_bytes(content)
+            with self.assertRaisesRegex(AssertionError, message):
+                verifier.inspect(path)
+
+    def test_macho_truncation_is_rejected(self):
+        path = self.build / "theweb"
+        for length in (4, 31, 50, 135):
+            path.write_bytes(macho_image()[:length])
+            with self.assertRaisesRegex(AssertionError, "truncated"):
+                verifier.inspect(path)
+
+    def test_macos_wrong_architecture_and_missing_dependencies_fail(self):
+        for name in packager.MACOS_APPS:
+            (self.build / name).write_bytes(macho_image("x64"))
+        with self.assertRaisesRegex(ValueError, "macos-dependencies"):
+            packager.package(self.root, self.build, self.destination, "macos-x64", TAG, COMMIT)
+        with self.assertRaisesRegex(ValueError, "architecture"):
+            packager.package(self.root, self.build, self.destination, "macos-arm64", TAG, COMMIT,
+                             self.dependencies)
+        self.assertFalse(self.destination.exists())
+
+    def test_macos_bundle_failure_prevents_archive(self):
+        for name in packager.MACOS_APPS:
+            (self.build / name).write_bytes(macho_image())
+        with patch.object(packager.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "cmake")):
+            with self.assertRaises(subprocess.CalledProcessError):
+                packager.package(self.root, self.build, self.destination, "macos-arm64", TAG, COMMIT,
+                                 self.dependencies)
+        self.assertFalse(self.destination.exists())
+
+    def test_macos_signature_failure_prevents_archive(self):
+        for name in packager.MACOS_APPS:
+            (self.build / name).write_bytes(macho_image())
+
+        def command(args, **kwargs):
+            if args[0] == "codesign" and "--verify" in args:
+                raise subprocess.CalledProcessError(1, args)
+            return subprocess.CompletedProcess(args, 0, stdout="test version")
+
+        with patch.object(packager.subprocess, "run", side_effect=command):
+            with self.assertRaises(subprocess.CalledProcessError):
+                packager.package(self.root, self.build, self.destination, "macos-arm64", TAG, COMMIT,
+                                 self.dependencies)
+        self.assertFalse(self.destination.exists())
 
     def test_missing_binary_fails_before_archiving(self):
         (self.build / "theweb-enhanced.exe").unlink()
@@ -224,8 +357,7 @@ class ReleaseTests(unittest.TestCase):
             packager.validate_identity(TAG, "short")
 
     def test_publication_creates_prerelease_with_verified_tag(self):
-        self.package("windows-x64")
-        self.package("linux-x64")
+        self.all_packages()
         missing = subprocess.CompletedProcess(["gh"], 1, stdout="", stderr="release not found")
         with patch.object(publisher.subprocess, "run", side_effect=[missing, subprocess.CompletedProcess([], 0)]) as gh:
             publisher.publish(TAG, COMMIT, self.destination)
@@ -236,8 +368,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("--notes-file", command)
 
     def test_publication_preserves_notes_and_completes_draft(self):
-        self.package("windows-x64")
-        self.package("linux-x64")
+        self.all_packages()
         draft = subprocess.CompletedProcess([], 0, stdout=json.dumps({"isDraft": True, "isImmutable": False}))
         with patch.object(publisher.subprocess, "run", side_effect=[draft, subprocess.CompletedProcess([], 0),
                                                                  subprocess.CompletedProcess([], 0)]) as gh:
@@ -248,8 +379,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(commands[2], ["gh", "release", "edit", TAG, "--draft=false"])
 
     def test_immutable_release_and_api_errors_stop_publication(self):
-        self.package("windows-x64")
-        self.package("linux-x64")
+        self.all_packages()
         immutable = subprocess.CompletedProcess([], 0, stdout=json.dumps({"isDraft": False, "isImmutable": True}))
         with patch.object(publisher.subprocess, "run", return_value=immutable) as gh:
             with self.assertRaisesRegex(SystemExit, "immutable"):

@@ -1,4 +1,4 @@
-"""Verify both platform artifacts, then attach them to their existing source tag."""
+"""Verify all platform artifacts, then attach them to their existing source tag."""
 import hashlib
 import json
 import os
@@ -11,7 +11,8 @@ import zipfile
 def verify_artifacts(directory, tag, commit):
     checksums = []
     archives = []
-    for platform, extension in (("windows-x64", ".zip"), ("linux-x64", ".tar.gz")):
+    for platform, extension in (("windows-x64", ".zip"), ("linux-x64", ".tar.gz"),
+                                ("macos-arm64", ".zip"), ("macos-x64", ".zip")):
         name = f"TheWeb-{tag}-{platform}"
         archive = directory / (name + extension)
         expected = hashlib.sha256(archive.read_bytes()).hexdigest() + f"  {archive.name}\n"
@@ -38,13 +39,20 @@ def publish(tag, commit, directory):
     notes = directory / "release-notes.md"
     notes.write_text(
         f"Classic and Enhanced, built from `{commit}` (tag `{tag}`).\n\n"
-        "Download the Windows x64 ZIP or Linux x64 tar.gz and extract it. "
+        "Download the Windows x64 ZIP, Linux x64 tar.gz, or macOS ZIP "
+        "(arm64 for Apple Silicon, x64 for Intel) and extract it. "
         "Both editions are included. These downloads contain no game data or music. "
-        "Supply your own complete `PC_DAT` folder as `data/PC_DAT` beside the games; "
+        "On Windows/Linux, supply your own complete `PC_DAT` folder as `data/PC_DAT` beside the games; "
         "see the included README for setup and optional music.\n\n"
         "Windows 10/11 x64: the Visual C++ runtime is linked statically. "
         "Linux x64: built on Ubuntu 22.04; install SDL2 and mpg123 runtime libraries "
         "(`sudo apt-get install libsdl2-2.0-0 libmpg123-0` on Debian/Ubuntu).\n\n"
+        "macOS 15 or later: move both apps to Applications. SDL2 and mpg123 are bundled; "
+        "Homebrew is not required. In Finder, press Shift+Command+G and open "
+        "`~/Library/Application Support/theweb/data` (created on first launch). "
+        "Copy your complete `PC_DAT` folder there; optional music goes in `data/MUSIC`. "
+        "Both apps share this data and keep separate saves outside the app bundles. "
+        "These apps are ad-hoc signed, not Apple-notarized; see the README for first-launch steps.\n\n"
         "`SHA256SUMS` verifies the downloads. Each archive includes per-file checksums "
         "and `build-info.json` with source and edition versions.\n", encoding="utf-8")
     gh = lambda *args, **kwargs: subprocess.run(["gh", "release", *args], **kwargs)

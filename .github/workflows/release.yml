@@ -30,7 +30,7 @@ jobs:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
           persist-credentials: false
       - id: source
-        name: Resolve the tagged source once for both platforms
+        name: Resolve the tagged source once for all platforms
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         shell: python
@@ -55,6 +55,12 @@ jobs:
           - os: ubuntu-22.04
             platform: linux-x64
             binary_dir: build/release
+          - os: macos-15
+            platform: macos-arm64
+            binary_dir: build/release
+          - os: macos-15-intel
+            platform: macos-x64
+            binary_dir: build/release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -70,6 +76,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev libmpg123-dev
+      - name: Build macOS shared libraries from pinned sources
+        if: runner.os == 'macOS'
+        run: python tools/build-macos-dependencies.py --build-dir build/macos-dependencies
       - name: Configure Windows Release with static compiler runtime
         if: runner.os == 'Windows'
         run: >-
@@ -81,6 +90,14 @@ jobs:
         if: runner.os == 'Linux'
         run: >-
           cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
+          -DWEB_EDITION=both -DWEB_BUILD_GAMES=ON -DBUILD_TESTING=ON
+          -DWEB_ASSET_TESTS=OFF -DWEB_REFERENCE_TOOLS=OFF -DWEB_DESKTOP_TESTS=OFF
+      - name: Configure macOS Release
+        if: runner.os == 'macOS'
+        run: >-
+          cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$PWD/build/macos-dependencies/install"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
           -DWEB_EDITION=both -DWEB_BUILD_GAMES=ON -DBUILD_TESTING=ON
           -DWEB_ASSET_TESTS=OFF -DWEB_REFERENCE_TOOLS=OFF -DWEB_DESKTOP_TESTS=OFF
       - run: cmake --build build/release --config Release --parallel 2
@@ -96,11 +113,33 @@ jobs:
         shell: python
         run: |
           import os, subprocess, sys
-          subprocess.run([sys.executable, 'tools/package-release.py',
+          command = [sys.executable, 'tools/package-release.py',
               '--build-dir', os.environ['RELEASE_BINARIES'],
               '--platform', os.environ['RELEASE_PLATFORM'],
               '--tag', os.environ['RELEASE_TAG'],
-              '--commit', os.environ['RELEASE_COMMIT']], check=True)
+              '--commit', os.environ['RELEASE_COMMIT']]
+          if sys.platform == 'darwin':
+              command += ['--macos-dependencies', 'build/macos-dependencies/install']
+          subprocess.run(command, check=True)
+      - name: Verify extracted macOS downloads after relocation
+        if: runner.os == 'macOS'
+        shell: python
+        run: |
+          from pathlib import Path
+          import plistlib, subprocess, tempfile
+          archives = list(Path('dist').glob('*.zip'))
+          assert len(archives) == 1
+          with tempfile.TemporaryDirectory(prefix='The Web download ') as temporary:
+              subprocess.run(['ditto', '-x', '-k', str(archives[0].resolve()), temporary], check=True)
+              apps = list(Path(temporary).glob('*/*.app'))
+              assert len(apps) == 2
+              for app in apps:
+                  subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
+                  with (app / 'Contents/Info.plist').open('rb') as source:
+                      name = plistlib.load(source)['CFBundleExecutable']
+                  for option in ('--help', '--version'):
+                      subprocess.run([str(app / 'Contents/MacOS' / name), option],
+                                     cwd='/', check=True, timeout=30)
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.platform }}

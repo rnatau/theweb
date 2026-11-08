@@ -1,4 +1,5 @@
 #include "application.hpp"
+#include "asset_paths.hpp"
 #include "../diagnostic_log.hpp"
 #include "smoke_scenario.hpp"
 #include "../../session_lifecycle.hpp"
@@ -39,9 +40,24 @@ std::filesystem::path executable_directory() {
 }
 std::filesystem::path assets_directory() {
     const auto directory = executable_directory();
-    for (const auto& candidate : {directory / "data/PC_DAT", directory / "PC_DAT", directory.parent_path() / "data/PC_DAT"})
-        if (std::filesystem::is_regular_file(candidate / "70/TABLE/VIEW.BIT") && std::filesystem::is_regular_file(candidate / "MATRIX/FONTS/FONT1.BIT"))
-            return std::filesystem::canonical(candidate);
+    std::filesystem::path shared_data;
+#ifdef __APPLE__
+    // User media stays outside signed apps and survives app updates/translocation.
+    if (const auto home = std::getenv("HOME"); home && *home)
+        shared_data = std::filesystem::path(home) / "Library/Application Support/theweb/data";
+#endif
+    if (const auto assets = find_desktop_assets(directory, shared_data))
+        return *assets;
+#ifdef __APPLE__
+    if (!shared_data.empty()) {
+        std::filesystem::create_directories(shared_data);
+        throw std::runtime_error(
+            "Game data is required. In Finder, choose Go > Go to Folder (Shift+Command+G) and enter:\n\n"
+            "~/Library/Application Support/theweb/data\n\n"
+            "Copy your complete original PC_DAT folder there, then reopen the game. Both editions use this folder. "
+            "Optional MP3 tracks go in data/MUSIC. See the included README for details.");
+    }
+#endif
     throw std::runtime_error("Cannot find The Web assets. Place data/PC_DAT beside the executable.");
 }
 std::filesystem::path default_save_root() {
@@ -1077,6 +1093,9 @@ int linux_main(int argc, char** argv, bool development, const Edition& edition) 
         return run_linux(launch, edition);
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';
+#ifdef __APPLE__
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "The Web", error.what(), nullptr);
+#endif
         return 1;
     }
 }

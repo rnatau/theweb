@@ -21,6 +21,7 @@ six cameras, DMD, sound effects and optional MP3 music.
 - Runs on modern Windows/Linux/macOS without a CD or original executable.
 - Aspect-preserving fullscreen/windowed scaling and crisp DMD dots.
 - Separate edition saves, atomic writes and damaged-file protection.
+- Windows Raw Input keyboard handling.
 - Safety guards and Space Station exit-artwork cleanup.
 
 Classic otherwise preserves original behavior and quality settings.
@@ -34,9 +35,11 @@ Classic otherwise preserves original behavior and quality settings.
 - Event-driven WASAPI audio, independent of rendering.
 - Pause-menu resume and integrated settings menus.
 - Maximum graphics/effects quality: 1024×768, 44.1 kHz stereo, 16-bit.
+- Antialiased ball/flipper edges and partial ball occlusion; the DMD stays crisp.
 - Directional nudging with persistent ball displacement.
 - A 10% narrower lower-flipper gap.
-- Hold Start for one second to drain the table and restart.
+- Hold Start for one second to launch any waiting ball and drain into standby,
+  with the pre-game DMD shown immediately. Press Start again after draining.
 - Missions don't get interrupted by other events
 - Pre-buy-in high scores are still stored
 - Original physics, rule, display and stereo bug corrections.

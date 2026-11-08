@@ -91,7 +91,8 @@ const Edition& selected_edition() {
         .normalize_sound = enhanced::normalize_sound,
         .input_version = "timestamped-input-v2",
         .timestamped_input = true,
-        .incremental_presentation = true};
+        .incremental_presentation = true,
+        .sprite_antialiasing = true};
     return edition;
 }
 } // namespace web

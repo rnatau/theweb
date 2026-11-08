@@ -4,6 +4,7 @@
 #include "ball_presentation.hpp"
 #include "lamp_presentation.hpp"
 #include "ball_draw_order.hpp"
+#include "sprite_coverage.hpp"
 #include <optional>
 
 namespace web {
@@ -31,6 +32,10 @@ class TableRenderer {
 public:
     void draw_display(Bitmap&, const DotMatrixFrame&, bool low_detail);
     TableRenderer(const std::filesystem::path& assets, unsigned variant);
+    void antialias_sprites(bool enabled);
+    bool antialias_sprites() const {
+        return antialias_sprites_;
+    }
     const Bitmap&
     compose(TableMotionView simulation, bool depth = false, std::span<const std::int32_t> lamps = {}, const DotMatrixFrame* display = nullptr, bool advance_raster = true, bool current_motion = false);
     const Bitmap& compose(TableFrameView frame, unsigned detail, bool depth = false) {
@@ -111,6 +116,9 @@ private:
     std::array<MechanismArtwork, 3> flippers_;
     std::array<MechanismArtwork, 2> spinners_;
     SpriteFrames ball_, shadow_;
+    std::array<std::vector<SpriteCoverage>, 3> flipper_coverage_;
+    std::vector<SpriteCoverage> ball_coverage_;
+    bool antialias_sprites_ = false;
     std::array<SpriteFrames, 3> lamps_; // Original controller banks: off, on, half.
     std::array<int, 3> flipper_offsets_{};
     void translate_flippers(TableMotionView simulation);

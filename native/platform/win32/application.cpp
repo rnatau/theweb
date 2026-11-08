@@ -812,6 +812,7 @@ public:
     void load_view() {
         if (game) {
             renderer = std::make_unique<web::TableRenderer>(assets, variant);
+            renderer->antialias_sprites(edition.sprite_antialiasing);
             renderer->enable_lamp_timing();
             return;
         }

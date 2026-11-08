@@ -101,6 +101,16 @@ void TableRenderer::enable_lamp_timing(bool flipping) {
     lamp_backdrop_ = background_;
     lamp_pages_.fill(background_);
 }
+void TableRenderer::antialias_sprites(bool enabled) {
+    if (enabled && ball_coverage_.empty()) {
+        for (unsigned i = 0; i < flippers_.size(); ++i)
+            for (const auto& frame : flippers_[i].frames)
+                flipper_coverage_[i].emplace_back(frame);
+        for (const auto& frame : ball_)
+            ball_coverage_.emplace_back(frame);
+    }
+    antialias_sprites_ = enabled;
+}
 void TableRenderer::advance_lamps(std::span<const std::int32_t, 79> lamps, std::int32_t repetitions, bool animation, bool force_refresh) {
     if (!timed_lamps_)
         enable_lamp_timing();
@@ -267,8 +277,12 @@ const Bitmap& TableRenderer::compose(TableMotionView simulation, bool depth, std
                 screen_.pixels[std::size_t(y + depth_top_) * screen_.width + x] = visible_depth.sample(x, y) * 0x010101;
         return screen_;
     }
+    const auto& visible_depth = translated_depth_ ? *translated_depth_ : depth_;
     for (unsigned i = 0; i < 3; i++)
-        sprite(flippers_[i].frames, flipper_frame(simulation.mechanisms.flippers[i]), flipper_offsets_[i], 0);
+        if (antialias_sprites_)
+            flipper_coverage_[i].at(flipper_frame(simulation.mechanisms.flippers[i])).composite(screen_, visible_depth, flipper_offsets_[i], 0, depth_top_, bpp_);
+        else
+            sprite(flippers_[i].frames, flipper_frame(simulation.mechanisms.flippers[i]), flipper_offsets_[i], 0);
     for (unsigned i = 0; i < 2; i++)
         sprite(spinners_[i].frames, spinner_frame(simulation.mechanisms.spinners[i]), 0, 0);
     for (const auto slot : ball_slots_) {
@@ -278,7 +292,10 @@ const Bitmap& TableRenderer::compose(TableMotionView simulation, bool depth, std
             const auto p = projected_frame_ && !current_motion ? projected_balls_[slot] : projection_.project(ball);
             if (draws.shadow)
                 sprite(shadow_, unsigned(p.frame), p.x, p.y, &p.depth, true);
-            sprite(ball_, unsigned(p.frame), p.x, p.y, &p.depth);
+            if (antialias_sprites_)
+                ball_coverage_.at(unsigned(p.frame)).composite(screen_, visible_depth, p.x, p.y, depth_top_, bpp_, &p.depth);
+            else
+                sprite(ball_, unsigned(p.frame), p.x, p.y, &p.depth);
         }
     }
     if (display) {

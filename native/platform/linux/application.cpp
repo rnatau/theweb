@@ -653,6 +653,7 @@ private:
         if (!game_)
             return;
         table_ = std::make_unique<TableRenderer>(assets_, options_.display_variant());
+        table_->antialias_sprites(edition_.sprite_antialiasing);
         table_flipping_ = options_.screen_flip();
         table_->enable_lamp_timing(table_flipping_);
         table_->advance_balls(game_->table_view().motion);

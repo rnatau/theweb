@@ -38,6 +38,7 @@ struct Edition {
     std::string_view input_version = "frame-input-v1";
     bool timestamped_input = false;
     bool incremental_presentation = false;
+    bool sprite_antialiasing = false;
 };
 // Exactly one edition translation unit is linked into each executable. There
 // is no runtime switch and the faithful target cannot link Enhanced sources.

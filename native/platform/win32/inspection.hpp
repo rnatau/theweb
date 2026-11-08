@@ -53,9 +53,12 @@ enum ProbeMessage : UINT {
     query_remaining_microsteps = WM_APP + 42,
     query_completed_ticks = WM_APP + 43,
     query_raw_keyboard = WM_APP + 44,
+    query_sprite_antialiasing = WM_APP + 45,
 };
 template <class Host> std::optional<LRESULT> inspect(const Host& host, UINT message, WPARAM w) {
     switch (message) {
+        case query_sprite_antialiasing:
+            return host.renderer && host.renderer->antialias_sprites();
         case query_raw_keyboard:
             return unsigned(host.raw_keyboard_registered) | (unsigned(host.raw_keyboard.active()) << 1);
         case query_microsteps:

@@ -25,6 +25,7 @@ render/menu_selection.cpp
 render/presentation.cpp
 render/slideshow.cpp
 render/table_renderer.cpp
+render/sprite_coverage.cpp
 render/video_renderer.cpp
 rules/ball_rules.cpp
 rules/bonus.cpp

@@ -101,7 +101,9 @@ public:
     std::optional<MusicPlayback> completion;
     unsigned volume = 0, track = 0, last = 0;
     bool paused = true, changed = false, draining = false;
-    std::jthread worker;
+    // Xcode 16 libc++ does not provide jthread/stop_token.
+    std::atomic<bool> stopping = false;
+    std::thread worker;
     std::atomic<std::uint64_t> frames = 0;
     explicit Impl(const std::filesystem::path& root) :
         catalog(root) {
@@ -117,7 +119,7 @@ public:
         mpg123_format(decoder, 44100, MPG123_STEREO, MPG123_ENC_SIGNED_16);
         try {
             output = device(44100);
-            worker = std::jthread([this](std::stop_token stop) { run(stop); });
+            worker = std::thread([this] { run(); });
         } catch (...) {
             if (output)
                 SDL_CloseAudioDevice(output);
@@ -126,7 +128,7 @@ public:
         }
     }
     ~Impl() {
-        worker.request_stop();
+        stopping.store(true);
         worker.join();
         SDL_CloseAudioDevice(output);
         mpg123_delete(decoder);
@@ -136,9 +138,9 @@ public:
         if (mpg123_open(decoder, catalog.file(track).c_str()) != MPG123_OK)
             throw std::runtime_error("Cannot decode music " + catalog.file(track).string());
     }
-    void run(std::stop_token stop) {
+    void run() {
         std::array<std::int16_t, 2048> pcm{};
-        while (!stop.stop_requested()) {
+        while (!stopping.load()) {
             {
                 std::lock_guard guard(mutex);
                 try {

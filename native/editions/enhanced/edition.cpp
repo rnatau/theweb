@@ -8,7 +8,7 @@
 
 namespace web {
 namespace {
-constexpr std::string_view version = "1.60a";
+constexpr std::string_view version = "1.60b";
 class DirectionalNudge final : public NudgePresentation {
 public:
     bool trigger(Bitmap&, unsigned, std::uint32_t actions) override {

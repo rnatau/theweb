@@ -1,14 +1,14 @@
 # Pro Pinball: The Web — native reconstruction
 
 A C++20 reconstruction for modern Windows, Linux and macOS, with **Classic 1.52p**
-(`theweb`) and **Enhanced 1.60a** (`theweb-enhanced`).
+(`theweb`) and **Enhanced 1.60B** (`theweb-enhanced`).
 
 **This effort relied HEAVILY on OpenAI Codex** for reconstruction, implementation,
 testing and documentation, guided by a human developer. This is an unofficial
 project, unaffiliated with the original game's creators or rights holders.
 
 Only source code, build files and tests are included. There is no original game
-executable, artwork, font artwork, sound, music, disassembly or analysis archive.
+executable, artwork, font artwork, sound or music.
 You must supply your own legally obtained game data to play. Compiling and running
 the tests requires no original game files.
 
@@ -28,6 +28,15 @@ Classic otherwise preserves original behavior and quality settings.
 
 ## Enhanced
 
+#### 1.60B
+
+* Added MacOS support (partly untested)
+* Add Antialiasing
+* Fix sticky keys/paddles
+* Make restart more realistic (balls don't disappear, ever)
+
+#### 1.60A
+
 - DirectX 11 GPU rendering on Windows, with GDI fallback.
 - Frame-synchronized high-refresh play; validated at 175 Hz on Windows.
 - Timestamped keyboard/controller input applied within physics ticks.
@@ -44,8 +53,9 @@ Classic otherwise preserves original behavior and quality settings.
 - Pre-buy-in high scores are still stored
 - Original physics, rule, display and stereo bug corrections.
 
-High-refresh rendering preserves 60 Hz rules/timers and original DMD cadence,
-without interpolation.
+#### 1.52P
+
+* Original state
 
 ## Build
 
@@ -53,14 +63,40 @@ Run commands from this repository's root. No game data is needed to compile.
 
 ### Download release binaries
 
-GitHub Releases provide a Windows x64 ZIP and a Linux x64 tar.gz, each containing
-Classic and Enhanced. Extract the archive, then supply `data/PC_DAT` beside the
-executables as described below. Game data and music are never included.
+GitHub Releases provide a Windows x64 ZIP, a Linux x64 tar.gz, and macOS ZIPs
+for Apple Silicon (`macos-arm64`) and Intel (`macos-x64`), each containing Classic
+and Enhanced. Extract the archive, then supply your own game data as described
+below. Game data and music are never included.
 Windows release downloads link the Visual C++ runtime statically. Linux downloads
 are built on Ubuntu 22.04 and require SDL2 and mpg123 runtime libraries
 (`sudo apt-get install libsdl2-2.0-0 libmpg123-0` on Debian/Ubuntu).
+macOS downloads require macOS 15 or later and include SDL2 and mpg123; players do
+not need Homebrew. The exact library sources, licenses and rebuild instructions
+are included in each macOS archive.
 Each release includes `SHA256SUMS`; each archive includes per-file checksums and
 `build-info.json` identifying the source commit and edition versions.
+
+### Install the macOS download
+
+1. Choose the ZIP for your Mac's chip (Apple menu > About This Mac), then
+   double-click it to extract it.
+2. Drag **The Web Classic.app** and **The Web Enhanced.app** to **Applications**.
+3. Open either app once. If data is missing, it creates the data folder and shows
+   setup instructions. In Finder, press **Shift+Command+G** (Go > Go to Folder),
+   enter `~/Library/Application Support/theweb/data`, then press Return.
+4. Copy your **complete original `PC_DAT` folder** into that folder. The result
+   must be `~/Library/Application Support/theweb/data/PC_DAT/70/TABLE/VIEW.BIT`
+   (plus all the other original files). Both editions share this copy.
+5. Reopen either app from Applications. Optional music belongs in
+   `~/Library/Application Support/theweb/data/MUSIC/Track02.mp3` through
+   `Track24.mp3`, as described below.
+
+The apps are ad-hoc signed and are **not Apple-notarized**. If macOS blocks an app,
+attempt to open it, then use **System Settings > Privacy & Security > Open Anyway**
+for that app, if you trust this download. Repeat for the other edition if needed.
+Do not put data inside an app using Show Package Contents: this changes its
+signature, and replacing the app would remove those files. App updates leave
+your shared data and separate edition saves in Application Support intact.
 
 ### Windows
 
@@ -124,13 +160,16 @@ test suite (`python3 tools/test.py`).
 
 ## Supply game data and music
 
+For macOS app downloads, use the Application Support folder described above.
+The following layout applies to Windows/Linux releases and command-line builds.
+
 Copy the **complete `PC_DAT` directory** from your original game media or
 installation, preserving its subdirectories and filenames. Put it in a local
 `data` folder **beside the executable**. Do not rename it or flatten its contents.
 It contains the graphics, DMD fonts/animations, sound samples, collision maps and
 table data needed by both editions. No original EXE, installer or DirectX files
-are required. On Linux, preserve the original uppercase names; filenames are
-case-sensitive.
+are required. Preserve the original uppercase names, including on Macs with a
+case-sensitive filesystem.
 
 Use this layout (Windows build shown):
 
@@ -155,6 +194,8 @@ For macOS, Linux or MinGW, place the same `data` directory directly in `build/ga
 (or the custom build folder). Adjacent `PC_DAT/` and parent `data/PC_DAT/` are
 also accepted. Data is found relative to the executable, independently of the
 terminal's working directory.
+macOS also checks `~/Library/Application Support/theweb/data/PC_DAT` first,
+including for command-line builds.
 
 **Music is optional; the game works without it.** Encode audio tracks you are
 entitled to use as MP3, one file per physical CD audio track, keeping the disc's
@@ -181,24 +222,26 @@ After adding data, launch either executable. For example:
 On Linux or macOS: `./build/game/theweb` or `./build/game/theweb-enhanced`.
 Any key skips the intro. Defaults:
 
-| Key | Action |
-| --- | --- |
-| S | Start / add player; Enhanced: hold one second to restart |
-| Enter | Launch; skip bonus |
-| C | Buy in at the continue prompt |
-| F / J | Left / right flippers (J also controls the upper flipper) |
-| Space / G / H | Up / side nudges |
-| P | Pause / resume |
-| V | Change camera |
-| Alt+Enter | Toggle fullscreen |
-| Escape | Classic: return home; Enhanced: open pause menu |
-| F2 / F4 | Classic settings / menu overlay |
+
+| Key           | Action                                                    |
+| ------------- | --------------------------------------------------------- |
+| S             | Start / add player; Enhanced: hold one second to restart  |
+| Enter         | Launch; skip bonus                                        |
+| C             | Buy in at the continue prompt                             |
+| F / J         | Left / right flippers (J also controls the upper flipper) |
+| Space / G / H | Up / side nudges                                          |
+| P             | Pause / resume                                            |
+| V             | Change camera                                             |
+| Alt+Enter     | Toggle fullscreen                                         |
+| Escape        | Classic: return home; Enhanced: open pause menu           |
+| F2 / F4       | Classic settings / menu overlay                           |
 
 Enhanced settings and controller bindings are in OPTIONS. Use `--windowed`,
 `--fullscreen`, `--mute`, `--save-dir PATH`, `--no-save`, `--help` or `--version`
 as needed. Saves use separate `classic` and `enhanced` subfolders under
 `saves/` beside the executables on Windows. Linux uses `$XDG_DATA_HOME/theweb/`
-or `~/.local/share/theweb/`. `--save-dir PATH` selects an explicit parent.
+or `~/.local/share/theweb/`. macOS uses `~/Library/Application Support/theweb/`.
+`--save-dir PATH` selects an explicit parent for saves; it does not move game data.
 For record initials, use F/J to select letters, Enter/S to confirm and C to go back.
 
 ## Test with one command (no original artwork)

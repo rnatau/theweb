@@ -7,6 +7,7 @@ from pathlib import Path
 import plistlib
 import struct
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -57,14 +58,24 @@ def pe_image(entries=(), pe32=False):
     return image
 
 
-def macho_image(architecture="arm64", symbol_type=0x0f, dwarf=False):
+def macho_image(architecture="arm64", symbol_type=0x0f, dwarf=False, strip_marker=False):
     image = bytearray(256)
     cpu = 0x0100000c if architecture == "arm64" else 0x01000007
     struct.pack_into('<IIIIIIII', image, 0, 0xfeedfacf, cpu, 0, 2, 2, 96, 0, 0)
     struct.pack_into('<II16sQQQQIIII', image, 32, 0x19, 72,
                      b'__DWARF' if dwarf else b'__TEXT', 0, 0, 0, 0, 0, 0, 0, 0)
-    struct.pack_into('<IIIIII', image, 104, 2, 24, 128, 1, 144, 16)
-    struct.pack_into('<IBBHQ', image, 128, 1, symbol_type, 1, 0, 0)
+    symbols = [(b'_main', symbol_type, 1, 0, 0)]
+    if strip_marker:
+        # Apple strip inserts this N_OPT record even with -S -x.
+        symbols.insert(0, (b'radr://5614542', 0x3c, 0, 0, 0x05614542))
+    strings = bytearray(b'\0')
+    for index, (name, kind, section, description, value) in enumerate(symbols):
+        struct.pack_into('<IBBHQ', image, 128 + index * 16, len(strings),
+                         kind, section, description, value)
+        strings.extend(name + b'\0')
+    string_offset = 128 + len(symbols) * 16
+    struct.pack_into('<IIIIII', image, 104, 2, 24, 128, len(symbols), string_offset, len(strings))
+    image[string_offset:string_offset + len(strings)] = strings
     return image
 
 
@@ -112,6 +123,11 @@ class ReleaseTests(unittest.TestCase):
                 (executable.parent / "libtest.dylib").write_bytes(executable.read_bytes())
                 if getattr(self, "bundle_symlink", False):
                     (executable.parent / "libalias.dylib").symlink_to("libtest.dylib")
+            if args[0] == "strip" and getattr(self, "strip_marker", False):
+                binary = Path(args[-1])
+                cpu = struct.unpack_from('<I', binary.read_bytes(), 4)[0]
+                binary.write_bytes(macho_image("arm64" if cpu == 0x0100000c else "x64",
+                                               strip_marker=True))
             if args[0] == "codesign" and "--sign" in args and args[-1].endswith(".app"):
                 signature = Path(args[-1]) / "Contents/_CodeSignature"
                 signature.mkdir()
@@ -198,6 +214,71 @@ class ReleaseTests(unittest.TestCase):
         for architecture in ("arm64", "x64"):
             path.write_bytes(macho_image(architecture))
             self.assertEqual(verifier.inspect(path)["architecture"], architecture)
+
+    def test_macos_packaging_accepts_apple_strip_marker(self):
+        self.strip_marker = True
+        for platform in ("macos-arm64", "macos-x64"):
+            with self.subTest(platform=platform):
+                self.assertTrue(self.package(platform).is_file())
+
+    @unittest.skipUnless(sys.platform == "darwin", "Requires Apple's compiler and strip")
+    def test_macos_native_strip_output_is_accepted(self):
+        source = self.root / "strip-test.c"
+        source.write_text('#include <stdio.h>\nint main(void) { return puts("strip test") < 0; }\n',
+                          encoding="utf-8")
+        for filetype, flags in ((2, []), (6, ["-dynamiclib"])):
+            with self.subTest(filetype=filetype):
+                binary = self.build / ("strip-test" if filetype == 2 else "libstrip-test.dylib")
+                subprocess.run(["xcrun", "clang", "-g", "-Wl,-S,-x", *flags,
+                                str(source), "-o", str(binary)], check=True)
+                subprocess.run(["strip", "-S", "-x", str(binary)], check=True)
+                self.assertEqual(verifier.inspect(binary)["format"], "Mach-O")
+
+    def test_macho_only_exact_apple_strip_marker_is_accepted(self):
+        path = self.build / "theweb"
+        for architecture in ("arm64", "x64"):
+            for filetype in (2, 6):
+                with self.subTest(architecture=architecture, filetype=filetype):
+                    image = macho_image(architecture, strip_marker=True)
+                    struct.pack_into('<I', image, 12, filetype)
+                    path.write_bytes(image)
+                    self.assertEqual(verifier.inspect(path)["architecture"], architecture)
+        # A matching name alone must not exempt a different symbol record.
+        for offset, fmt, value in ((132, 'B', 0x64), (133, 'B', 1),
+                                    (134, 'H', 1), (136, 'Q', 0), (161, 'B', ord('x'))):
+            with self.subTest(offset=offset):
+                image = macho_image(strip_marker=True)
+                struct.pack_into('<' + fmt, image, offset, value)
+                path.write_bytes(image)
+                with self.assertRaisesRegex(AssertionError, "debug symbols"):
+                    verifier.inspect(path)
+        for kind, message in ((0x64, "debug symbols"), (0x3c, "debug symbols"),
+                              (0x0e, "private symbols")):
+            with self.subTest(kind=kind):
+                path.write_bytes(macho_image(symbol_type=kind, strip_marker=True))
+                with self.assertRaisesRegex(AssertionError, message):
+                    verifier.inspect(path)
+        image = macho_image(strip_marker=True)
+        image[128:160] = image[144:160] + image[128:144]
+        path.write_bytes(image)
+        with self.assertRaisesRegex(AssertionError, "debug symbols"):
+            verifier.inspect(path)
+
+    def test_macho_malformed_string_tables_are_rejected(self):
+        path = self.build / "theweb"
+        for offset, value in ((120, 256), (124, 256), (128, 256)):
+            with self.subTest(offset=offset):
+                image = macho_image(strip_marker=True)
+                struct.pack_into('<I', image, offset, value)
+                path.write_bytes(image)
+                with self.assertRaisesRegex(AssertionError, "Mach-O.*string"):
+                    verifier.inspect(path)
+        image = macho_image(strip_marker=True)
+        # A NUL outside the declared string table must not terminate a name.
+        struct.pack_into('<I', image, 124, len(b'\0radr://5614542'))
+        path.write_bytes(image)
+        with self.assertRaisesRegex(AssertionError, "unterminated Mach-O symbol name"):
+            verifier.inspect(path)
 
     @unittest.skipIf(os.name == "nt", "Windows symlinks require additional privileges")
     def test_macos_library_symlinks_survive_archiving(self):

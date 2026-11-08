@@ -97,10 +97,23 @@ def inspect_macho(data, path):
                     f'{path}: debug sections remain'
         elif command == 2:  # LC_SYMTAB: exported/dynamic symbols must remain usable.
             assert length >= 24, f'{path}: truncated Mach-O symbol command'
-            offset, symbols = struct.unpack_from('<II', data, cursor + 8)
+            offset, symbols, string_offset, string_size = struct.unpack_from('<IIII', data, cursor + 8)
             assert offset + symbols * 16 <= len(data), f'{path}: truncated Mach-O symbol table'
+            assert string_offset + string_size <= len(data), f'{path}: truncated Mach-O string table'
+            strings = data[string_offset:string_offset + string_size]
             for index in range(symbols):
-                kind = data[offset + index * 16 + 4]
+                name_offset, kind, section, description, value = struct.unpack_from(
+                    '<IBBHQ', data, offset + index * 16)
+                assert name_offset < string_size, f'{path}: invalid Mach-O symbol string offset'
+                name_end = strings.find(b'\0', name_offset)
+                assert name_end >= 0, f'{path}: unterminated Mach-O symbol name'
+                # Apple strip -S -x inserts this exact N_OPT sentinel at index zero
+                # to keep indirect symbols away from index zero (rdar 5614542).
+                # It carries no debug information; all other STABS remain forbidden.
+                # https://github.com/apple-oss-distributions/cctools/blob/main/misc/strip.c
+                if (index == 0 and (kind, section, description, value) == (0x3c, 0, 0, 0x05614542)
+                        and strings[name_offset:name_end] == b'radr://5614542'):
+                    continue
                 assert not kind & 0xe0, f'{path}: Mach-O debug symbols remain'
                 assert kind & 1 or (kind & 0x0e) == 0, f'{path}: Mach-O private symbols remain'
         cursor += length

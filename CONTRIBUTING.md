@@ -1,7 +1,8 @@
 # Contributing
 
 The portable C++20 engine lives in `native/physics`, `native/rules` and
-`native/render`; Windows and Linux services live in `native/platform`.
+`native/render`; Windows, Linux and macOS services live in `native/platform`.
+The SDL host in `native/platform/linux` is shared by Linux and macOS.
 `native/editions/classic` and `native/editions/enhanced` supply edition policies.
 Keep Classic behavior and deliberate Enhanced changes separate.
 

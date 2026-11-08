@@ -1,6 +1,6 @@
 # Pro Pinball: The Web — native reconstruction
 
-A C++20 reconstruction for modern Windows and Linux, with **Classic 1.52p**
+A C++20 reconstruction for modern Windows, Linux and macOS, with **Classic 1.52p**
 (`theweb`) and **Enhanced 1.60a** (`theweb-enhanced`).
 
 **This effort relied HEAVILY on OpenAI Codex** for reconstruction, implementation,
@@ -18,7 +18,7 @@ Reconstructed Windows 1.50P rules and integer physics, with the supplied 1.52P
 caption. Includes one to four players, all missions/modes, original menus,
 six cameras, DMD, sound effects and optional MP3 music.
 
-- Runs on modern Windows/Linux without a CD or original executable.
+- Runs on modern Windows/Linux/macOS without a CD or original executable.
 - Aspect-preserving fullscreen/windowed scaling and crisp DMD dots.
 - Separate edition saves, atomic writes and damaged-file protection.
 - Safety guards and Space Station exit-artwork cleanup.
@@ -97,6 +97,28 @@ cmake --build build/game --parallel 2
 The executables are `build/game/theweb` and `build/game/theweb-enhanced`.
 SDL2 and mpg123 runtime libraries are required even when music is absent.
 
+### macOS (Apple Silicon or Intel)
+
+Install the Xcode command line tools (`xcode-select --install`) and
+[Homebrew](https://brew.sh), then run:
+
+```sh
+brew install cmake sdl2 mpg123 python
+cmake -S . -B build/game -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+cmake --build build/game --parallel 2
+./build/game/theweb --help
+./build/game/theweb-enhanced --help
+```
+
+Both editions use SDL2 for graphics, keyboard/controller input and audio on
+macOS. These are native command-line executables, built for your Mac's
+architecture; keep the Homebrew SDL2 and mpg123 libraries installed.
+Supply the original game data as described below, then launch either executable
+from Terminal. Option+Enter toggles fullscreen. Saves are stored separately per
+edition under `~/Library/Application Support/theweb/`; `--save-dir PATH`
+overrides this location. No game data is required to build or run the synthetic
+test suite (`python3 tools/test.py`).
+
 ## Supply game data and music
 
 Copy the **complete `PC_DAT` directory** from your original game media or
@@ -126,7 +148,7 @@ build/game/Release/
       Track24.mp3
 ```
 
-For Linux or MinGW, place the same `data` directory directly in `build/game/`
+For macOS, Linux or MinGW, place the same `data` directory directly in `build/game/`
 (or the custom build folder). Adjacent `PC_DAT/` and parent `data/PC_DAT/` are
 also accepted. Data is found relative to the executable, independently of the
 terminal's working directory.
@@ -153,7 +175,7 @@ After adding data, launch either executable. For example:
 .\build\game\Release\theweb-enhanced.exe
 ```
 
-On Linux: `./build/game/theweb` or `./build/game/theweb-enhanced`.
+On Linux or macOS: `./build/game/theweb` or `./build/game/theweb-enhanced`.
 Any key skips the intro. Defaults:
 
 | Key | Action |
@@ -194,9 +216,11 @@ audio buffers, plus temporary save files.
 Coverage includes integer physics, collision/flipper mechanisms, rules and
 scoring primitives, binary formats, software mixing, save failure handling,
 viewport/nudge presentation and source dependency boundaries. Windows adds
-synthetic image-scaling checks; Linux adds real filesystem save/locking checks.
+synthetic image-scaling checks; Linux and macOS add real filesystem save/locking
+checks.
 This suite does not establish complete gameplay fidelity or test a real audio
-device/controller. GitHub Actions runs the same command on Windows and Linux.
+device/controller. GitHub Actions runs the same command on Windows, Linux and
+macOS.
 
 ## Development and rights
 
